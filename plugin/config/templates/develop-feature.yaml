@@ -1,0 +1,58 @@
+# Develop feature workflow template
+# Full agent chain: mockup-fullstack → planner → plan-reviewer → implementer → code-reviewer → tester
+#
+# Usage: /chain-builder bump develop-feature
+
+hooks:
+  PostToolUse:
+    - plugin:post-agent.cjs
+  SubagentStart:
+    - plugin:subagent-start.cjs
+  SubagentStop:
+    - plugin:subagent-stop.cjs
+
+flow:
+  planner:
+    routes:
+      plan-reviewer: "Plan created, ready for review"
+
+  plan-reviewer:
+    reset_counters: true
+    routes:
+      implementer: "Plan approved, ready to implement"
+      planner: "Plan has issues, needs revision"
+    decide: |
+      If plan is APPROVED, complete, ready for implementation → "implementer"
+      If plan has ISSUES, incomplete, needs revision, missing details → "planner"
+
+  implementer:
+    routes:
+      parallel-review: "Code implemented, ready for review"
+
+  parallel-review:
+    type: team
+    teammates:
+      - name: code-quality
+        agent: code-reviewer
+        prompt: "Review code for bugs, quality, and adherence to plan"
+      - name: security-check
+        agent: security-scan
+        prompt: "Scan for security vulnerabilities"
+    routes:
+      tester: "All reviews passed"
+      implementer: "Issues found, needs fixes"
+    decide: |
+      If ALL reviews PASSED with no issues → "tester"
+      If ANY review found issues, bugs, vulnerabilities → "implementer"
+
+  tester:
+    routes:
+      END: "All tests passed"
+      debugger: "Tests failed, needs debugging"
+    decide: |
+      If ALL tests PASS, no failures, no errors → "END"
+      If ANY test FAILS, errors, bugs found → "debugger"
+
+  debugger:
+    routes:
+      implementer: "Bug diagnosed, ready to fix"

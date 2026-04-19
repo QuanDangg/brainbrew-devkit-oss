@@ -1,0 +1,55 @@
+# Fast develop feature workflow template
+# Optimized agent chain: lean-planner (self-reviewed) → lean-implementer (parallel) → review → test
+# Eliminates planner↔reviewer bounce loop. ~60-70% faster than develop-feature.yaml
+#
+# Usage: /chain-builder bump develop-feature-fast
+
+hooks:
+  PostToolUse:
+    - plugin:post-agent.cjs
+  SubagentStart:
+    - plugin:subagent-start.cjs
+  SubagentStop:
+    - plugin:subagent-stop.cjs
+
+flow:
+  # Single planning step — lean-planner self-reviews, no bounce loop
+  lean-planner:
+    routes:
+      lean-implementer: "Plan created and self-reviewed, ready to implement"
+
+  # Implementation with parallel backend/frontend tracks
+  lean-implementer:
+    routes:
+      parallel-review: "Code implemented, ready for review"
+
+  # Code review + security scan in parallel (same as original)
+  parallel-review:
+    type: team
+    teammates:
+      - name: code-quality
+        agent: code-reviewer
+        prompt: "Review code for bugs, quality, and adherence to plan"
+      - name: security-check
+        agent: security-scan
+        prompt: "Scan for security vulnerabilities"
+    routes:
+      tester: "All reviews passed"
+      lean-implementer: "Issues found, needs fixes"
+    decide: |
+      If ALL reviews PASSED with no issues → "tester"
+      If ANY review found issues, bugs, vulnerabilities → "lean-implementer"
+
+  # Testing (same as original)
+  tester:
+    routes:
+      END: "All tests passed"
+      debugger: "Tests failed, needs debugging"
+    decide: |
+      If ALL tests PASS, no failures, no errors → "END"
+      If ANY test FAILS, errors, bugs found → "debugger"
+
+  # Debug loop (same as original)
+  debugger:
+    routes:
+      lean-implementer: "Bug diagnosed, ready to fix"

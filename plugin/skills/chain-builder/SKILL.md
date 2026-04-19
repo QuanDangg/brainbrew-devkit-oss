@@ -31,6 +31,7 @@ mcp__brainbrew__template_bump(template: "develop")
 | `support` | ticket-classifier → router → knowledge-searcher → response-drafter → reviewer |
 | `data` | data-collector → cleaner → analyzer → visualizer → reporter |
 | `moderation` | content-scanner → classifier → flagger → reviewer → actioner |
+| `jira-fix` | jira-fetcher → bug-classifier → branch-setup → implementer → tester → git-manager (product-bug → new fix branch off `git.default_branch`; feature-bug → fix on existing feature branch, driven by `.claude/config.yaml`) |
 | `review` | code-reviewer → END |
 | `skill-dev` | skill-finder → skill-creator → skill-reviewer (PASS = END, FIXES → skill-improver) |
 | `minimal` | hooks only (add your own) |

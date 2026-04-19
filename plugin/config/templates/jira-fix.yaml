@@ -1,0 +1,140 @@
+# Jira bug-fix workflow
+# Fetches Jira issue(s) via mcp-atlassian, classifies bug type, checks out the
+# right branch, investigates root cause from screenshot + code, implements fix,
+# runs tests, verifies UI (if frontend), reviews, opens PR, transitions issue.
+#
+# Handles both:
+#   1. Product bugs        → checkout git.default_branch, create new fix branch
+#   2. New-feature bugs    → fix on the existing feature branch
+#
+# Scope-aware: classifier tags each issue as frontend | backend | fullstack so
+# ui-verifier runs only when there's UI to verify.
+#
+# Routing uses .claude/config.yaml (jira.branch_field + git.*). User passes
+# one or more issue keys (e.g. "PROJ-123" or "PROJ-123,PROJ-124").
+#
+# Usage: /chain-builder bump jira-fix
+
+hooks:
+  PostToolUse:
+    - plugin:post-agent.cjs
+  SubagentStart:
+    - plugin:subagent-start.cjs
+  SubagentStop:
+    - plugin:subagent-stop.cjs
+
+flow:
+  jira-fetcher:
+    context: |
+      Fetch Jira issue(s), extract key/summary/description/type/status/labels/branch_field.
+      Download attachments to .jira/{KEY}/attachments/ via jira-save-attachments skill.
+      Output YAML per issue with attachments: [paths].
+    routes:
+      bug-classifier: "Issues fetched"
+
+  bug-classifier:
+    context: |
+      Classify each issue on TWO axes:
+        1. Branch type: PRODUCT (no branch_field) or FEATURE (branch_field set).
+        2. Scope: frontend | backend | fullstack — inferred from summary,
+           description, screenshots, and labels. UI/display/column/tab bugs
+           → frontend. API/DB/sync bugs → backend. Data flow crossing both
+           → fullstack.
+      Output columns:
+        {issue_key} | {type} | {scope} | {target_branch} | {new_branch} | {same_branch}
+      Use Project Config branch_field, git.default_branch, branch_format rules.
+      SINGLE-BRANCH RULE: when multiple product bugs arrive together, all
+      of them share ONE new_branch. Branch name format is
+      "{type}/{username}-{issue_keys}" where {issue_keys} = every product
+      key joined by "-" (e.g. fix/alice-PROJ-123-PROJ-125). No slug.
+    routes:
+      branch-setup: "Classification complete"
+
+  branch-setup:
+    context: |
+      Group rows by new_branch. Checkout each unique branch exactly once.
+      fetch → checkout target_branch → pull --ff-only → create new_branch
+      (skip creation if same_branch == true).
+    routes:
+      investigator: "Branches ready"
+
+  investigator:
+    context: |
+      For EACH issue: read the screenshot(s) under .jira/{KEY}/attachments/,
+      read the description, then grep/read the source code to locate the
+      exact files and lines causing the bug. Produce a root-cause note
+      (file:line + wrong vs expected behavior + proposed fix) per issue.
+      Do NOT edit code. Output a fix plan the implementer can follow.
+    routes:
+      implementer: "Root cause identified"
+
+  implementer:
+    context: |
+      Implement fixes for ALL issues on the current branch in one pass
+      following the investigator's fix plan (multiple product bugs share
+      one branch). Follow Project Config (commit_format, test.command).
+      Do NOT commit — git-manager will.
+    routes:
+      tester: "Fix implemented"
+
+  tester:
+    context: |
+      Run build + unit/integration tests per Project Config test.command.
+      Route based on test result AND scope from bug-classifier:
+        - tests FAIL → debugger
+        - tests PASS + scope is frontend/fullstack → ui-verifier
+        - tests PASS + scope is backend → code-reviewer
+    routes:
+      debugger: "Tests failed, needs debugging"
+      ui-verifier: "Tests passed, UI needs visual verification"
+      code-reviewer: "Tests passed, backend-only scope"
+    decide: |
+      If ANY test FAILS or build errors → "debugger"
+      Else if scope ∈ {frontend, fullstack} → "ui-verifier"
+      Else → "code-reviewer"
+
+  debugger:
+    context: |
+      Diagnose test failures reported by tester. Find root cause at source,
+      not symptom. Produce a fix plan; do not edit code. Hand off to
+      implementer for the actual fix.
+    routes:
+      implementer: "Bug diagnosed, ready to fix"
+
+  ui-verifier:
+    context: |
+      For frontend/fullstack issues: use webapp-testing (Playwright) to
+      load the affected page, reproduce the reporter's steps, compare
+      against the attached screenshot + expected behavior. Report PASS
+      or FAIL with screenshots/console logs as evidence.
+    routes:
+      code-reviewer: "UI matches expected behavior"
+      investigator: "UI still wrong, re-investigate"
+    decide: |
+      If page renders expected data/behavior per issue description → "code-reviewer"
+      Else → "investigator"
+
+  code-reviewer:
+    context: |
+      Review the diff for correctness, scope creep, security, and project
+      conventions. Check fix targets root cause (not symptom) and does
+      not introduce regressions in unrelated files.
+    routes:
+      git-manager: "Review clean"
+      implementer: "Review found issues to fix"
+    decide: |
+      If diff is minimal, targeted, follows conventions → "git-manager"
+      Else → "implementer"
+
+  git-manager:
+    context: |
+      For EACH issue key: stage only the files belonging to that issue and
+      create one commit using Project Config commit_format (issue_key goes
+      in the commit subject, NOT the branch name). If files can't be cleanly
+      split per issue, fall back to one commit covering all issues and list
+      every issue key in the subject/body.
+      After all commits: push new_branch ONCE, open ONE PR to target_branch
+      listing every issue key in the PR title/body. Transition each Jira
+      issue and add a PR-link comment per issue.
+    routes:
+      END: "Chain complete"

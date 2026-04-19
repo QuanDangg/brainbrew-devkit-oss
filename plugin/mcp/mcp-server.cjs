@@ -21006,7 +21006,7 @@ var TOOLS = [
       properties: {
         template: {
           type: "string",
-          enum: ["develop", "devops", "marketing", "research", "docs", "support", "data", "moderation", "review", "minimal"],
+          enum: ["develop", "develop-feature", "develop-feature-fast", "devops", "marketing", "research", "docs", "support", "data", "moderation", "review", "minimal", "jira-fix", "skill-dev"],
           description: "Template name to set up"
         }
       },

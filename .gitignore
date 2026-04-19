@@ -4,3 +4,7 @@ settings.local.json
 .DS_Store
 docs/.vitepress/cache/
 docs/.vitepress/dist/
+CLAUDE.md
+.mcp.json
+.jira
+.claude/worktrees/
